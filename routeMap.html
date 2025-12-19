@@ -1,0 +1,465 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Маршрут похода</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: var(--tg-theme-bg-color, #ffffff);
+            color: var(--tg-theme-text-color, #000000);
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .header {
+            padding: 12px 16px;
+            background: var(--tg-theme-secondary-bg-color, #f5f5f5);
+            border-bottom: 1px solid var(--tg-theme-hint-color, #ccc);
+        }
+
+        .header h1 {
+            font-size: 18px;
+            font-weight: 600;
+        }
+
+        .header p {
+            font-size: 13px;
+            color: var(--tg-theme-hint-color, #999);
+            margin-top: 4px;
+        }
+
+        #map {
+            flex: 1;
+            width: 100%;
+        }
+
+        .controls {
+            padding: 12px 16px;
+            background: var(--tg-theme-bg-color, #fff);
+            border-top: 1px solid var(--tg-theme-hint-color, #ccc);
+            display: flex;
+            gap: 10px;
+        }
+
+        .btn {
+            flex: 1;
+            padding: 12px 16px;
+            border: none;
+            border-radius: 10px;
+            font-size: 15px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: opacity 0.2s;
+        }
+
+        .btn:active {
+            opacity: 0.7;
+        }
+
+        .btn-secondary {
+            background: var(--tg-theme-secondary-bg-color, #f0f0f0);
+            color: var(--tg-theme-text-color, #000);
+        }
+
+        .btn-primary {
+            background: var(--tg-theme-button-color, #3390ec);
+            color: var(--tg-theme-button-text-color, #fff);
+        }
+
+        .btn-danger {
+            background: #ff3b30;
+            color: #fff;
+        }
+
+        .points-info {
+            padding: 8px 16px;
+            background: var(--tg-theme-secondary-bg-color, #f5f5f5);
+            font-size: 13px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .points-count {
+            font-weight: 600;
+        }
+
+        .distance {
+            color: var(--tg-theme-hint-color, #999);
+        }
+
+        .view-mode .controls {
+            justify-content: center;
+        }
+
+        .view-mode .btn {
+            flex: none;
+            width: auto;
+            padding: 12px 32px;
+        }
+
+        .leaflet-container {
+            font-family: inherit;
+        }
+
+        .point-popup {
+            text-align: center;
+        }
+
+        .point-popup .point-name {
+            font-weight: 600;
+            margin-bottom: 4px;
+        }
+
+        .point-popup .point-coords {
+            font-size: 12px;
+            color: #666;
+            margin-bottom: 8px;
+        }
+
+        .point-popup .btn-remove {
+            background: #ff3b30;
+            color: #fff;
+            border: none;
+            padding: 6px 12px;
+            border-radius: 6px;
+            font-size: 13px;
+            cursor: pointer;
+        }
+
+        .marker-number {
+            background: var(--tg-theme-button-color, #3390ec);
+            color: #fff;
+            border-radius: 50%;
+            width: 24px;
+            height: 24px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 12px;
+            font-weight: 600;
+            border: 2px solid #fff;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.3);
+        }
+    </style>
+</head>
+<body>
+<div class="header">
+    <h1 id="headerTitle">Создание маршрута</h1>
+    <p id="headerHint">Нажмите на карту, чтобы добавить точку маршрута</p>
+</div>
+
+<div id="map"></div>
+
+<div class="points-info">
+    <span class="points-count" id="pointsCount">Точек: 0</span>
+    <span class="distance" id="distance"></span>
+</div>
+
+<div class="controls" id="controls">
+    <button class="btn btn-danger" onclick="clearPoints()" id="clearBtn">🗑 Очистить</button>
+    <button class="btn btn-primary" onclick="saveRoute()" id="saveBtn">💾 Сохранить</button>
+</div>
+
+<script>
+    // Инициализация Telegram Web App
+    const tg = window.Telegram.WebApp;
+    tg.ready();
+    tg.expand();
+
+    // Парсинг параметров
+    const params = new URLSearchParams(window.location.search);
+    const mode = params.get('mode') || 'create'; // 'create' или 'view'
+    const hikeId = params.get('hike_id');
+    const routeData = params.get('route'); // JSON с существующим маршрутом
+
+    // Состояние
+    let points = [];
+    let markers = [];
+    let polyline = null;
+    let isViewMode = mode === 'view';
+
+    // Настройка UI для режима просмотра
+    if (isViewMode) {
+        document.body.classList.add('view-mode');
+        document.getElementById('headerTitle').textContent = 'Просмотр маршрута';
+        document.getElementById('headerHint').textContent = 'Маршрут вашего похода';
+        document.getElementById('controls').innerHTML =
+            '<button class="btn btn-secondary" onclick="tg.close()">Закрыть</button>';
+    }
+
+    // Инициализация карты
+    const map = L.map('map', {
+        zoomControl: true,
+        attributionControl: false
+    }).setView([55.7558, 37.6173], 10);
+
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        maxZoom: 19
+    }).addTo(map);
+
+    // Кастомная иконка маркера
+    function createNumberedIcon(number) {
+        return L.divIcon({
+            className: 'custom-marker',
+            html: `<div class="marker-number">${number}</div>`,
+            iconSize: [24, 24],
+            iconAnchor: [12, 12]
+        });
+    }
+
+    // Загрузка существующего маршрута
+    if (routeData) {
+        try {
+            const decoded = decodeURIComponent(routeData);
+            const route = JSON.parse(decoded);
+            if (route.points && Array.isArray(route.points)) {
+                route.points.forEach((p, idx) => {
+                    addPointInternal(p.lat || p.Latitude, p.lng || p.Longitude, p.name || `Точка ${idx + 1}`, false);
+                });
+                fitMapToPoints();
+            }
+        } catch (e) {
+            console.error('Error parsing route data:', e);
+        }
+    }
+
+    // Обработка клика по карте (только в режиме создания)
+    if (!isViewMode) {
+        map.on('click', function(e) {
+            addPoint(e.latlng.lat, e.latlng.lng);
+        });
+    }
+
+    function addPoint(lat, lng) {
+        const name = `Точка ${points.length + 1}`;
+        addPointInternal(lat, lng, name, true);
+    }
+
+    function addPointInternal(lat, lng, name, canRemove) {
+        const point = {
+            lat: parseFloat(lat.toFixed(6)),
+            lng: parseFloat(lng.toFixed(6)),
+            name: name
+        };
+        points.push(point);
+
+        const marker = L.marker([lat, lng], {
+            icon: createNumberedIcon(points.length)
+        }).addTo(map);
+
+        // Popup с информацией
+        let popupContent = `
+                <div class="point-popup">
+                    <div class="point-name">${name}</div>
+                    <div class="point-coords">${lat.toFixed(4)}, ${lng.toFixed(4)}</div>
+            `;
+
+        if (canRemove && !isViewMode) {
+            const pointIndex = points.length - 1;
+            popupContent += `<button class="btn-remove" onclick="removePoint(${pointIndex})">Удалить</button>`;
+        }
+
+        popupContent += '</div>';
+        marker.bindPopup(popupContent);
+
+        markers.push(marker);
+        updatePolyline();
+        updateInfo();
+    }
+
+    function removePoint(index) {
+        if (index < 0 || index >= points.length) return;
+
+        // Удаляем точку
+        points.splice(index, 1);
+
+        // Удаляем все маркеры и создаем заново
+        markers.forEach(m => map.removeLayer(m));
+        markers = [];
+
+        const pointsCopy = [...points];
+        points = [];
+
+        pointsCopy.forEach((p, idx) => {
+            addPointInternal(p.lat, p.lng, `Точка ${idx + 1}`, true);
+        });
+
+        map.closePopup();
+    }
+
+    function updatePolyline() {
+        if (polyline) {
+            map.removeLayer(polyline);
+        }
+
+        if (points.length >= 2) {
+            polyline = L.polyline(
+                points.map(p => [p.lat, p.lng]),
+                {
+                    color: tg.themeParams.button_color || '#3390ec',
+                    weight: 4,
+                    opacity: 0.8
+                }
+            ).addTo(map);
+        }
+    }
+
+    function calculateDistance() {
+        if (points.length < 2) return 0;
+
+        let total = 0;
+        for (let i = 0; i < points.length - 1; i++) {
+            total += haversineDistance(
+                points[i].lat, points[i].lng,
+                points[i+1].lat, points[i+1].lng
+            );
+        }
+        return total;
+    }
+
+    function haversineDistance(lat1, lon1, lat2, lon2) {
+        const R = 6371; // km
+        const dLat = (lat2 - lat1) * Math.PI / 180;
+        const dLon = (lon2 - lon1) * Math.PI / 180;
+        const a =
+            Math.sin(dLat/2) * Math.sin(dLat/2) +
+            Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+            Math.sin(dLon/2) * Math.sin(dLon/2);
+        const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+        return R * c;
+    }
+
+    function updateInfo() {
+        document.getElementById('pointsCount').textContent = `Точек: ${points.length}`;
+
+        const dist = calculateDistance();
+        if (dist > 0) {
+            document.getElementById('distance').textContent = `≈ ${dist.toFixed(2)} км`;
+        } else {
+            document.getElementById('distance').textContent = '';
+        }
+
+        // Активируем/деактивируем кнопки
+        const saveBtn = document.getElementById('saveBtn');
+        const clearBtn = document.getElementById('clearBtn');
+        if (saveBtn) {
+            saveBtn.disabled = points.length < 2;
+            saveBtn.style.opacity = points.length < 2 ? '0.5' : '1';
+        }
+        if (clearBtn) {
+            clearBtn.disabled = points.length === 0;
+            clearBtn.style.opacity = points.length === 0 ? '0.5' : '1';
+        }
+    }
+
+    function fitMapToPoints() {
+        if (points.length === 0) return;
+
+        if (points.length === 1) {
+            map.setView([points[0].lat, points[0].lng], 14);
+        } else {
+            const bounds = L.latLngBounds(points.map(p => [p.lat, p.lng]));
+            map.fitBounds(bounds, { padding: [50, 50] });
+        }
+    }
+
+    function clearPoints() {
+        if (points.length === 0) return;
+
+        tg.showConfirm('Удалить все точки маршрута?', function(confirmed) {
+            if (confirmed) {
+                points = [];
+                markers.forEach(m => map.removeLayer(m));
+                markers = [];
+                if (polyline) {
+                    map.removeLayer(polyline);
+                    polyline = null;
+                }
+                updateInfo();
+            }
+        });
+    }
+
+    function saveRoute() {
+        if (points.length < 2) {
+            tg.showAlert('Добавьте минимум 2 точки для создания маршрута');
+            return;
+        }
+
+        const routeData = {
+            action: 'save_route',
+            hike_id: hikeId ? parseInt(hikeId) : null,
+            points: points,
+            distance: calculateDistance()
+        };
+
+        tg.sendData(JSON.stringify(routeData));
+    }
+
+    // Геолокация - центрирование на текущем местоположении
+    if (navigator.geolocation && !routeData) {
+        navigator.geolocation.getCurrentPosition(
+            function(pos) {
+                map.setView([pos.coords.latitude, pos.coords.longitude], 12);
+            },
+            function(err) {
+                console.log('Geolocation error:', err);
+            },
+            { enableHighAccuracy: true, timeout: 5000 }
+        );
+    }
+
+    // Кнопка "Назад" Telegram
+    tg.BackButton.show();
+    tg.BackButton.onClick(function() {
+        if (!isViewMode && points.length > 0) {
+            tg.showConfirm('Выйти без сохранения?', function(confirmed) {
+                if (confirmed) {
+                    tg.close();
+                }
+            });
+        } else {
+            tg.close();
+        }
+    });
+
+    // Main Button для сохранения
+    if (!isViewMode) {
+        tg.MainButton.setText('💾 Сохранить маршрут');
+        tg.MainButton.onClick(saveRoute);
+        // Показываем только когда есть точки
+        if (points.length >= 2) {
+            tg.MainButton.show();
+        }
+    }
+
+    // Обновление MainButton при изменении точек
+    const originalUpdateInfo = updateInfo;
+    updateInfo = function() {
+        originalUpdateInfo();
+        if (!isViewMode) {
+            if (points.length >= 2) {
+                tg.MainButton.show();
+            } else {
+                tg.MainButton.hide();
+            }
+        }
+    };
+
+    updateInfo();
+</script>
+</body>
+</html>
