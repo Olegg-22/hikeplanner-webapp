@@ -70,8 +70,8 @@
         .loading {
             position: fixed; top: 0; left: 0; right: 0; bottom: 0;
             background: rgba(0,0,0,0.5);
-            display: flex; align-items: center; justify-content: center;
-            z-index: 10000; display: none;
+            display: none; align-items: center; justify-content: center;
+            z-index: 10000;
         }
         .loading.show { display: flex; }
         .loading-content {
@@ -123,7 +123,7 @@
         const params = new URLSearchParams(window.location.search);
         const mode = params.get('mode') || 'create';
         const hikeId = params.get('hike_id');
-        const apiUrl = params.get('api_url'); // URL вашего сервера
+        const apiUrl = params.get('api_url');
         const routeDataParam = params.get('route');
 
         let points = [];
@@ -143,13 +143,14 @@
         }
 
         // Инициализация
-        showStatus('Загрузка... hike_id=' + hikeId + ', api=' + (apiUrl || 'не указан'));
+        showStatus('Загрузка... mode=' + mode + ', hike_id=' + hikeId);
 
+        // Настройка UI для режима просмотра
         if (isViewMode) {
             document.getElementById('headerTitle').textContent = 'Просмотр маршрута';
             document.getElementById('headerHint').textContent = 'Маршрут вашего похода';
             document.getElementById('controls').innerHTML = 
-                '<button class="btn btn-secondary" onclick="closeApp()">Закрыть</button>';
+                '<button class="btn btn-secondary" onclick="closeApp()" style="flex:none;padding:12px 32px;">Закрыть</button>';
         }
 
         // Карта
@@ -167,21 +168,54 @@
 
         // Загрузка существующего маршрута
         if (routeDataParam) {
+            showStatus('Загрузка маршрута из URL...');
+            console.log('Raw route param:', routeDataParam);
+            
             try {
-                const route = JSON.parse(decodeURIComponent(routeDataParam));
-                if (route.points?.length) {
-                    route.points.forEach((p, i) => {
-                        addPointInternal(p.lat || p.Latitude, p.lng || p.lon || p.Longitude, 
-                                        p.name || 'Точка ' + (i+1), !isViewMode);
+                const decoded = decodeURIComponent(routeDataParam);
+                console.log('Decoded:', decoded);
+                
+                const routeObj = JSON.parse(decoded);
+                console.log('Parsed route object:', routeObj);
+                
+                // Поддержка разных форматов
+                let pointsArray = routeObj.points || routeObj.Points || routeObj;
+                
+                if (Array.isArray(pointsArray) && pointsArray.length > 0) {
+                    console.log('Points array:', pointsArray);
+                    
+                    pointsArray.forEach((p, i) => {
+                        // Поддержка разных названий полей
+                        const lat = p.lat || p.Lat || p.Latitude || p.latitude;
+                        const lng = p.lng || p.Lng || p.lon || p.Lon || p.Longitude || p.longitude;
+                        const name = p.name || p.Name || ('Точка ' + (i + 1));
+                        
+                        console.log('Point ' + i + ':', lat, lng, name);
+                        
+                        if (lat && lng) {
+                            addPointInternal(parseFloat(lat), parseFloat(lng), name, !isViewMode);
+                        }
                     });
-                    fitMapToPoints();
-                    showStatus('Загружено ' + points.length + ' точек', 'success');
+                    
+                    if (points.length > 0) {
+                        fitMapToPoints();
+                        showStatus('Загружено ' + points.length + ' точек', 'success');
+                    } else {
+                        showStatus('Точки не найдены в данных', 'error');
+                    }
+                } else {
+                    showStatus('Пустой массив точек', 'error');
+                    console.log('Points array is empty or invalid');
                 }
             } catch (e) {
                 showStatus('Ошибка загрузки: ' + e.message, 'error');
+                console.error('Parse error:', e);
             }
+        } else if (isViewMode) {
+            showStatus('Нет данных маршрута для просмотра', 'error');
         }
 
+        // Обработка кликов по карте (только в режиме редактирования)
         if (!isViewMode) {
             map.on('click', e => addPoint(e.latlng.lat, e.latlng.lng));
         }
@@ -192,7 +226,7 @@
         }
 
         function addPointInternal(lat, lng, name, canRemove) {
-            const point = { lat: +lat.toFixed(6), lng: +lng.toFixed(6), name };
+            const point = { lat: +lat.toFixed(6), lng: +lng.toFixed(6), name: name };
             points.push(point);
 
             const marker = L.marker([lat, lng], { icon: createIcon(points.length) }).addTo(map);
@@ -252,9 +286,18 @@
             const dist = calcDistance();
             document.getElementById('distance').textContent = dist > 0 ? '≈ ' + dist.toFixed(2) + ' км' : '';
             
-            document.getElementById('saveBtn').disabled = points.length < 2;
-            document.getElementById('clearBtn').disabled = points.length === 0;
+            // ИСПРАВЛЕНО: проверяем существование элементов перед обращением
+            const saveBtn = document.getElementById('saveBtn');
+            const clearBtn = document.getElementById('clearBtn');
+            
+            if (saveBtn) {
+                saveBtn.disabled = points.length < 2;
+            }
+            if (clearBtn) {
+                clearBtn.disabled = points.length === 0;
+            }
 
+            // MainButton только в режиме редактирования
             if (!isViewMode && tg?.MainButton) {
                 if (points.length >= 2) {
                     tg.MainButton.setText('💾 Сохранить (' + points.length + ' точек)');
@@ -270,7 +313,8 @@
             if (points.length === 1) {
                 map.setView([points[0].lat, points[0].lng], 14);
             } else {
-                map.fitBounds(L.latLngBounds(points.map(p => [p.lat, p.lng])), { padding: [50, 50] });
+                const bounds = L.latLngBounds(points.map(p => [p.lat, p.lng]));
+                map.fitBounds(bounds, { padding: [50, 50] });
             }
         }
 
@@ -365,8 +409,8 @@
             }
         }
 
-        // Геолокация
-        if (navigator.geolocation && !routeDataParam) {
+        // Геолокация (только при создании нового маршрута)
+        if (navigator.geolocation && !routeDataParam && !isViewMode) {
             navigator.geolocation.getCurrentPosition(
                 pos => map.setView([pos.coords.latitude, pos.coords.longitude], 12),
                 () => {}, { enableHighAccuracy: true, timeout: 5000 }
@@ -390,7 +434,10 @@
         }
 
         updateInfo();
-        showStatus('Готово. Нажмите на карту для добавления точек.', 'success');
+        
+        if (!routeDataParam && !isViewMode) {
+            showStatus('Готово. Нажмите на карту для добавления точек.', 'success');
+        }
     </script>
 </body>
 </html>
