@@ -393,21 +393,43 @@
         });
     }
 
-    function saveRoute() {
-        if (points.length < 2) {
-            tg.showAlert('Добавьте минимум 2 точки для создания маршрута');
-            return;
-        }
-
-        const routeData = {
-            action: 'save_route',
-            hike_id: hikeId ? parseInt(hikeId) : null,
-            points: points,
-            distance: calculateDistance()
-        };
-
-        tg.sendData(JSON.stringify(routeData));
+<script>
+function saveRoute() {
+    if (points.length < 2) {
+        tg.showAlert('Добавьте минимум 2 точки для создания маршрута');
+        return;
     }
+    
+    const routeData = {
+        action: 'save_route',
+        hike_id: hikeId ? parseInt(hikeId) : 0,
+        points: points,
+        distance: calculateDistance()
+    };
+    
+    console.log('Sending data:', JSON.stringify(routeData, null, 2));
+    
+    // Проверяем hike_id
+    if (!routeData.hike_id || routeData.hike_id <= 0) {
+        tg.showAlert('Ошибка: не указан ID похода');
+        console.error('Invalid hike_id:', hikeId);
+        return;
+    }
+    
+    try {
+        const jsonData = JSON.stringify(routeData);
+        console.log('JSON to send:', jsonData);
+        console.log('JSON length:', jsonData.length);
+        
+        // sendData закрывает приложение после отправки
+        tg.sendData(jsonData);
+        
+    } catch (e) {
+        console.error('Error sending data:', e);
+        tg.showAlert('Ошибка отправки: ' + e.message);
+    }
+}
+</script>
 
     // Геолокация - центрирование на текущем местоположении
     if (navigator.geolocation && !routeData) {
