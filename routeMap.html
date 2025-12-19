@@ -11,8 +11,8 @@
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body {
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-            background: var(--tg-theme-bg-color, #ffffff);
-            color: var(--tg-theme-text-color, #000000);
+            background: var(--tg-theme-bg-color, #fff);
+            color: var(--tg-theme-text-color, #000);
             height: 100vh;
             display: flex;
             flex-direction: column;
@@ -33,13 +33,8 @@
             gap: 10px;
         }
         .btn {
-            flex: 1;
-            padding: 12px 16px;
-            border: none;
-            border-radius: 10px;
-            font-size: 15px;
-            font-weight: 500;
-            cursor: pointer;
+            flex: 1; padding: 12px 16px; border: none; border-radius: 10px;
+            font-size: 15px; font-weight: 500; cursor: pointer;
         }
         .btn:disabled { opacity: 0.5; cursor: not-allowed; }
         .btn-secondary { background: var(--tg-theme-secondary-bg-color, #f0f0f0); color: var(--tg-theme-text-color, #000); }
@@ -51,44 +46,51 @@
             font-size: 13px;
             display: flex;
             justify-content: space-between;
-            align-items: center;
         }
-        .debug-panel {
-            padding: 8px 16px;
-            background: #fffbe6;
-            border-bottom: 1px solid #ffd666;
+        .status-bar {
+            padding: 6px 16px;
             font-size: 11px;
             font-family: monospace;
-            max-height: 100px;
-            overflow-y: auto;
+            background: #fffbe6;
+            border-bottom: 1px solid #ffd666;
+            display: none;
         }
-        .debug-panel.error { background: #fff2f0; border-color: #ff4d4f; }
-        .debug-panel.success { background: #f6ffed; border-color: #52c41a; }
+        .status-bar.show { display: block; }
+        .status-bar.error { background: #fff2f0; border-color: #ff4d4f; color: #a8071a; }
+        .status-bar.success { background: #f6ffed; border-color: #52c41a; color: #135200; }
         .marker-number {
             background: var(--tg-theme-button-color, #3390ec);
-            color: #fff;
-            border-radius: 50%;
-            width: 24px;
-            height: 24px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-size: 12px;
-            font-weight: 600;
+            color: #fff; border-radius: 50%;
+            width: 24px; height: 24px;
+            display: flex; align-items: center; justify-content: center;
+            font-size: 12px; font-weight: 600;
             border: 2px solid #fff;
             box-shadow: 0 2px 4px rgba(0,0,0,0.3);
         }
-        .point-popup { text-align: center; }
-        .point-popup .point-name { font-weight: 600; margin-bottom: 4px; }
-        .point-popup .point-coords { font-size: 12px; color: #666; margin-bottom: 8px; }
-        .point-popup .btn-remove {
-            background: #ff3b30; color: #fff; border: none;
-            padding: 6px 12px; border-radius: 6px; font-size: 13px; cursor: pointer;
+        .loading {
+            position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+            background: rgba(0,0,0,0.5);
+            display: flex; align-items: center; justify-content: center;
+            z-index: 10000; display: none;
         }
+        .loading.show { display: flex; }
+        .loading-content {
+            background: white; padding: 24px 32px; border-radius: 12px;
+            text-align: center;
+        }
+        .spinner {
+            width: 40px; height: 40px;
+            border: 4px solid #f3f3f3;
+            border-top: 4px solid var(--tg-theme-button-color, #3390ec);
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 12px;
+        }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
     </style>
 </head>
 <body>
-    <div class="debug-panel" id="debugPanel">Инициализация...</div>
+    <div class="status-bar" id="statusBar"></div>
     
     <div class="header">
         <h1 id="headerTitle">Создание маршрута</h1>
@@ -107,133 +109,118 @@
         <button class="btn btn-primary" onclick="saveRoute()" id="saveBtn" disabled>💾 Сохранить</button>
     </div>
 
+    <div class="loading" id="loading">
+        <div class="loading-content">
+            <div class="spinner"></div>
+            <div>Сохранение маршрута...</div>
+        </div>
+    </div>
+
     <script>
-        const debugPanel = document.getElementById('debugPanel');
-        
-        function debugLog(msg, isError = false, isSuccess = false) {
-            console.log(msg);
-            const time = new Date().toLocaleTimeString();
-            debugPanel.innerHTML = `[${time}] ${msg}<br>` + debugPanel.innerHTML;
-            debugPanel.className = 'debug-panel' + (isError ? ' error' : '') + (isSuccess ? ' success' : '');
-        }
-
-        // === ДИАГНОСТИКА TELEGRAM WEBAPP ===
-        debugLog('Загрузка страницы...');
-        
         const tg = window.Telegram?.WebApp;
-        
-        if (!tg) {
-            debugLog('❌ Telegram WebApp НЕ ДОСТУПЕН! Откройте через Telegram.', true);
-        } else {
-            debugLog('✓ Telegram WebApp загружен');
-            debugLog('Platform: ' + tg.platform);
-            debugLog('Version: ' + tg.version);
-            debugLog('initData length: ' + (tg.initData?.length || 0));
-            debugLog('initDataUnsafe: ' + JSON.stringify(tg.initDataUnsafe?.user?.id || 'null'));
-            
-            // Проверяем, можно ли отправлять данные
-            if (!tg.initData || tg.initData.length === 0) {
-                debugLog('⚠️ initData пустой - sendData может не работать!', true);
-            }
-            
-            tg.ready();
-            tg.expand();
-        }
+        if (tg) { tg.ready(); tg.expand(); }
 
-        // Парсинг параметров
         const params = new URLSearchParams(window.location.search);
         const mode = params.get('mode') || 'create';
         const hikeId = params.get('hike_id');
+        const apiUrl = params.get('api_url'); // URL вашего сервера
         const routeDataParam = params.get('route');
 
-        debugLog('Mode: ' + mode + ', HikeID: ' + hikeId);
-
-        if (!hikeId || hikeId === 'null' || hikeId === '0') {
-            debugLog('❌ hike_id не указан в URL!', true);
-        }
-
-        // Состояние
         let points = [];
         let markers = [];
         let polyline = null;
-        let isViewMode = mode === 'view';
+        const isViewMode = mode === 'view';
+
+        function showStatus(msg, type = '') {
+            const bar = document.getElementById('statusBar');
+            bar.textContent = msg;
+            bar.className = 'status-bar show ' + type;
+            console.log('[Status]', msg);
+        }
+
+        function showLoading(show) {
+            document.getElementById('loading').className = 'loading' + (show ? ' show' : '');
+        }
+
+        // Инициализация
+        showStatus('Загрузка... hike_id=' + hikeId + ', api=' + (apiUrl || 'не указан'));
 
         if (isViewMode) {
-            document.body.classList.add('view-mode');
             document.getElementById('headerTitle').textContent = 'Просмотр маршрута';
             document.getElementById('headerHint').textContent = 'Маршрут вашего похода';
             document.getElementById('controls').innerHTML = 
-                '<button class="btn btn-secondary" onclick="tg.close()">Закрыть</button>';
+                '<button class="btn btn-secondary" onclick="closeApp()">Закрыть</button>';
         }
 
         // Карта
         const map = L.map('map', { zoomControl: true, attributionControl: false })
             .setView([55.7558, 37.6173], 10);
-
         L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19 }).addTo(map);
 
-        function createNumberedIcon(number) {
+        function createIcon(num) {
             return L.divIcon({
                 className: 'custom-marker',
-                html: '<div class="marker-number">' + number + '</div>',
-                iconSize: [24, 24],
-                iconAnchor: [12, 12]
+                html: '<div class="marker-number">' + num + '</div>',
+                iconSize: [24, 24], iconAnchor: [12, 12]
             });
         }
 
         // Загрузка существующего маршрута
         if (routeDataParam) {
             try {
-                const decoded = decodeURIComponent(routeDataParam);
-                const route = JSON.parse(decoded);
-                if (route.points && Array.isArray(route.points)) {
-                    route.points.forEach((p, idx) => {
-                        const lat = p.lat || p.Latitude;
-                        const lng = p.lng || p.lon || p.Longitude;
-                        addPointInternal(lat, lng, p.name || 'Точка ' + (idx + 1), !isViewMode);
+                const route = JSON.parse(decodeURIComponent(routeDataParam));
+                if (route.points?.length) {
+                    route.points.forEach((p, i) => {
+                        addPointInternal(p.lat || p.Latitude, p.lng || p.lon || p.Longitude, 
+                                        p.name || 'Точка ' + (i+1), !isViewMode);
                     });
                     fitMapToPoints();
-                    debugLog('Загружено ' + points.length + ' точек');
+                    showStatus('Загружено ' + points.length + ' точек', 'success');
                 }
             } catch (e) {
-                debugLog('Ошибка загрузки маршрута: ' + e.message, true);
+                showStatus('Ошибка загрузки: ' + e.message, 'error');
             }
         }
 
         if (!isViewMode) {
-            map.on('click', (e) => addPoint(e.latlng.lat, e.latlng.lng));
+            map.on('click', e => addPoint(e.latlng.lat, e.latlng.lng));
         }
 
         function addPoint(lat, lng) {
             addPointInternal(lat, lng, 'Точка ' + (points.length + 1), true);
+            showStatus('Добавлена точка ' + points.length);
         }
 
         function addPointInternal(lat, lng, name, canRemove) {
             const point = { lat: +lat.toFixed(6), lng: +lng.toFixed(6), name };
             points.push(point);
 
-            const marker = L.marker([lat, lng], { icon: createNumberedIcon(points.length) }).addTo(map);
-
-            let popup = '<div class="point-popup"><div class="point-name">' + name + '</div>' +
-                '<div class="point-coords">' + lat.toFixed(4) + ', ' + lng.toFixed(4) + '</div>';
+            const marker = L.marker([lat, lng], { icon: createIcon(points.length) }).addTo(map);
+            
+            let popup = '<div style="text-align:center"><b>' + name + '</b><br>' +
+                        '<small>' + lat.toFixed(4) + ', ' + lng.toFixed(4) + '</small>';
             if (canRemove && !isViewMode) {
-                popup += '<button class="btn-remove" onclick="removePoint(' + (points.length - 1) + ')">Удалить</button>';
+                popup += '<br><button onclick="removePoint(' + (points.length-1) + ')" ' +
+                        'style="margin-top:8px;background:#ff3b30;color:#fff;border:none;' +
+                        'padding:4px 12px;border-radius:4px;cursor:pointer">Удалить</button>';
             }
             popup += '</div>';
             marker.bindPopup(popup);
             markers.push(marker);
+            
             updatePolyline();
             updateInfo();
         }
 
-        function removePoint(index) {
-            points.splice(index, 1);
+        function removePoint(idx) {
+            points.splice(idx, 1);
             markers.forEach(m => map.removeLayer(m));
             markers = [];
             const copy = [...points];
             points = [];
-            copy.forEach((p, i) => addPointInternal(p.lat, p.lng, 'Точка ' + (i + 1), true));
+            copy.forEach((p, i) => addPointInternal(p.lat, p.lng, 'Точка ' + (i+1), true));
             map.closePopup();
+            showStatus('Точка удалена, осталось: ' + points.length);
         }
 
         function updatePolyline() {
@@ -246,7 +233,7 @@
             }
         }
 
-        function calculateDistance() {
+        function calcDistance() {
             if (points.length < 2) return 0;
             let total = 0;
             for (let i = 0; i < points.length - 1; i++) {
@@ -262,13 +249,11 @@
 
         function updateInfo() {
             document.getElementById('pointsCount').textContent = 'Точек: ' + points.length;
-            const dist = calculateDistance();
+            const dist = calcDistance();
             document.getElementById('distance').textContent = dist > 0 ? '≈ ' + dist.toFixed(2) + ' км' : '';
             
-            const saveBtn = document.getElementById('saveBtn');
-            const clearBtn = document.getElementById('clearBtn');
-            if (saveBtn) saveBtn.disabled = points.length < 2;
-            if (clearBtn) clearBtn.disabled = points.length === 0;
+            document.getElementById('saveBtn').disabled = points.length < 2;
+            document.getElementById('clearBtn').disabled = points.length === 0;
 
             if (!isViewMode && tg?.MainButton) {
                 if (points.length >= 2) {
@@ -281,7 +266,7 @@
         }
 
         function fitMapToPoints() {
-            if (points.length === 0) return;
+            if (!points.length) return;
             if (points.length === 1) {
                 map.setView([points[0].lat, points[0].lng], 14);
             } else {
@@ -290,113 +275,122 @@
         }
 
         function clearPoints() {
+            const doIt = () => {
+                points = [];
+                markers.forEach(m => map.removeLayer(m));
+                markers = [];
+                if (polyline) { map.removeLayer(polyline); polyline = null; }
+                updateInfo();
+                showStatus('Все точки удалены');
+            };
+            
             if (tg?.showConfirm) {
-                tg.showConfirm('Удалить все точки?', (ok) => { if (ok) doClear(); });
-            } else {
-                if (confirm('Удалить все точки?')) doClear();
+                tg.showConfirm('Удалить все точки?', ok => { if (ok) doIt(); });
+            } else if (confirm('Удалить все точки?')) {
+                doIt();
             }
         }
 
-        function doClear() {
-            points = [];
-            markers.forEach(m => map.removeLayer(m));
-            markers = [];
-            if (polyline) { map.removeLayer(polyline); polyline = null; }
-            updateInfo();
-            debugLog('Все точки удалены');
+        function closeApp() {
+            if (tg?.close) tg.close();
+            else window.close();
         }
 
-        // === ГЛАВНАЯ ФУНКЦИЯ СОХРАНЕНИЯ ===
-        function saveRoute() {
-            debugLog('=== Сохранение маршрута ===');
+        // ============ СОХРАНЕНИЕ ============
+        async function saveRoute() {
+            showStatus('Начинаем сохранение...');
 
             if (points.length < 2) {
-                debugLog('Недостаточно точек', true);
-                if (tg?.showAlert) tg.showAlert('Добавьте минимум 2 точки');
+                showStatus('Добавьте минимум 2 точки!', 'error');
+                alert('Добавьте минимум 2 точки!');
                 return;
             }
 
             const hikeIdInt = parseInt(hikeId);
-            if (!hikeIdInt || hikeIdInt <= 0) {
-                debugLog('Ошибка: hike_id = ' + hikeId, true);
-                if (tg?.showAlert) tg.showAlert('Ошибка: не указан ID похода');
+            if (!hikeIdInt) {
+                showStatus('Ошибка: не указан hike_id', 'error');
+                alert('Ошибка: не указан ID похода');
+                return;
+            }
+
+            if (!apiUrl) {
+                showStatus('Ошибка: не указан api_url', 'error');
+                alert('Ошибка: сервер не настроен. Обратитесь к администратору.');
                 return;
             }
 
             const data = {
                 action: 'save_route',
                 hike_id: hikeIdInt,
+                user_id: tg?.initDataUnsafe?.user?.id || 0,
                 points: points,
-                distance: calculateDistance()
+                distance: calcDistance()
             };
 
-            debugLog('Данные: ' + JSON.stringify(data).substring(0, 100) + '...');
-
-            // Проверяем доступность sendData
-            if (!tg) {
-                debugLog('❌ Telegram WebApp недоступен', true);
-                alert('Откройте это приложение через Telegram!');
-                return;
-            }
-
-            if (!tg.sendData) {
-                debugLog('❌ tg.sendData не существует', true);
-                alert('Функция отправки недоступна');
-                return;
-            }
-
-            if (!tg.initData || tg.initData.length === 0) {
-                debugLog('⚠️ initData пустой - отправка может не сработать', true);
-            }
+            showLoading(true);
+            showStatus('Отправка на ' + apiUrl + '...');
 
             try {
-                const jsonData = JSON.stringify(data);
-                debugLog('Отправка ' + jsonData.length + ' байт...');
-                
-                // Вызываем sendData
-                tg.sendData(jsonData);
-                
-                debugLog('✓ sendData вызван (окно должно закрыться)', true, true);
-                
-                // Если окно не закрылось через 2 сек - что-то не так
-                setTimeout(() => {
-                    debugLog('⚠️ Окно не закрылось - данные возможно не отправлены', true);
-                }, 2000);
-                
+                const response = await fetch(apiUrl + '/api/save-route', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(data)
+                });
+
+                const result = await response.json();
+                showLoading(false);
+
+                if (response.ok && result.status === 'ok') {
+                    showStatus('✅ Маршрут сохранен!', 'success');
+                    
+                    setTimeout(() => {
+                        if (tg?.showAlert) {
+                            tg.showAlert('✅ Маршрут сохранен!\n\n' +
+                                        '📍 Точек: ' + points.length + '\n' +
+                                        '📏 Расстояние: ' + calcDistance().toFixed(2) + ' км',
+                                        () => closeApp());
+                        } else {
+                            alert('Маршрут сохранен!');
+                            closeApp();
+                        }
+                    }, 300);
+                } else {
+                    showStatus('❌ Ошибка: ' + (result.message || 'Неизвестная ошибка'), 'error');
+                    alert('Ошибка сохранения: ' + (result.message || 'Попробуйте позже'));
+                }
             } catch (e) {
-                debugLog('❌ Ошибка: ' + e.message, true);
-                if (tg?.showAlert) tg.showAlert('Ошибка: ' + e.message);
+                showLoading(false);
+                showStatus('❌ Сетевая ошибка: ' + e.message, 'error');
+                alert('Ошибка сети. Проверьте подключение и попробуйте снова.');
             }
         }
 
         // Геолокация
         if (navigator.geolocation && !routeDataParam) {
             navigator.geolocation.getCurrentPosition(
-                (pos) => map.setView([pos.coords.latitude, pos.coords.longitude], 12),
-                () => {},
-                { enableHighAccuracy: true, timeout: 5000 }
+                pos => map.setView([pos.coords.latitude, pos.coords.longitude], 12),
+                () => {}, { enableHighAccuracy: true, timeout: 5000 }
             );
         }
 
-        // Кнопки Telegram
+        // Telegram кнопки
         if (tg?.BackButton) {
             tg.BackButton.show();
             tg.BackButton.onClick(() => {
                 if (!isViewMode && points.length > 0) {
-                    tg.showConfirm('Выйти без сохранения?', (ok) => { if (ok) tg.close(); });
+                    tg.showConfirm('Выйти без сохранения?', ok => { if (ok) closeApp(); });
                 } else {
-                    tg.close();
+                    closeApp();
                 }
             });
         }
 
         if (tg?.MainButton && !isViewMode) {
-            tg.MainButton.setText('💾 Сохранить маршрут');
             tg.MainButton.onClick(saveRoute);
         }
 
         updateInfo();
-        debugLog('✓ Приложение готово');
+        showStatus('Готово. Нажмите на карту для добавления точек.', 'success');
     </script>
 </body>
 </html>
